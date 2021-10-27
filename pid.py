@@ -82,9 +82,9 @@ def close_serial_click():
 def make_pid_frame():
     ret_s = "59485A53" + "01" + "00000017" + "03"
     ret = bytearray.fromhex(ret_s)
-    ret.append(int(p_spin.get(), 10).to_bytes(4, 'big'))
-    ret.append(int(i_spin.get(), 10).to_bytes(4, 'big'))
-    ret.append(int(d_spin.get(), 10).to_bytes(4, 'big'))
+    ret += int(p_spin.get(), 10).to_bytes(4, 'big')
+    ret += int(i_spin.get(), 10).to_bytes(4, 'big')
+    ret += int(d_spin.get(), 10).to_bytes(4, 'big')
     ret.append(checksum(ret))
     print("the pid_frame is {}".format(ret.hex()))
     return ret
