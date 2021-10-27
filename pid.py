@@ -33,9 +33,8 @@ def up_process():
         recv = ser.read(17)
         if len(recv) > 0:
             print("data received: ", recv)
-        recv_buf_str.set(recv.hex())
+            recv_buf_str.set(recv.hex())
         sleep(0.5)
-        print("not blocked")
 
 Rx = threading.Thread(target=up_process, args=())
 is_serial_open = False
@@ -83,9 +82,9 @@ def close_serial_click():
 def make_pid_frame():
     ret_s = "59485A53" + "01" + "00000017" + "03"
     ret = bytearray.fromhex(ret_s)
-    ret.append(int(p_spin.get(), 16))
-    ret.append(int(i_spin.get(), 16))
-    ret.append(int(d_spin.get(), 16))
+    ret.append(int(p_spin.get(), 10).to_bytes(4, 'big'))
+    ret.append(int(i_spin.get(), 10).to_bytes(4, 'big'))
+    ret.append(int(d_spin.get(), 10).to_bytes(4, 'big'))
     ret.append(checksum(ret))
     print("the pid_frame is {}".format(ret.hex()))
     return ret
@@ -102,7 +101,7 @@ def checksum(frame):
 
 window = Tk()
 window.title("气压反馈")
-window.geometry("800x500")
+window.geometry("900x500")
 
 # GUI part 1: pid sending
 Label(window, text="P").grid(column=0, row=0)
@@ -121,11 +120,11 @@ send_pid_btn.grid(column=1, row=3)
 # GUI part 2: buffer view 
 Label(window, text="发送的数据包:").grid(column=2, row=0)
 send_buf_str = StringVar()
-Entry(window, textvariable=send_buf_str, width=30, background="white", state='readonly').grid(column=3, row=0)
+Entry(window, textvariable=send_buf_str, width=50, background="white", state='readonly').grid(column=3, row=0)
 
 Label(window, text="接收的数据包:").grid(column=2, row=1)
 recv_buf_str = StringVar()
-Entry(window, textvariable=recv_buf_str, width=30, background="white", state='readonly').grid(column=3, row=1)
+Entry(window, textvariable=recv_buf_str, width=50, background="white", state='readonly').grid(column=3, row=1)
 
 # GUI part 3: serial port 
 Label(window, text="选择串口:").grid(column=4, row=0)
@@ -145,3 +144,7 @@ close_serial_btn = Button(window, text="关闭串口", command=close_serial_clic
 close_serial_btn.grid(column=5, row=2)
 
 window.mainloop()
+
+is_serial_open = False
+sleep(0.1)
+ser.close()
