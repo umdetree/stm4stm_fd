@@ -66,9 +66,10 @@ def open_serial_click():
     open_serial_btn.configure(state=DISABLED)
     
 def close_serial_click():
-    ser.close()
     global is_serial_open
     is_serial_open = False
+    sleep(0.1)
+    ser.close()
     send_pid_btn.configure(state=DISABLED)
     close_serial_btn.configure(state=DISABLED)
     open_serial_btn.configure(state=ACTIVE)
