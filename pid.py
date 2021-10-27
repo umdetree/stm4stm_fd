@@ -7,6 +7,7 @@ import threading
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from serial.serialutil import SerialException
+from time import sleep
 
 ser = serial.Serial()
 
@@ -19,45 +20,59 @@ def send_pid_click():
     except SerialException:
         messagebox.showerror("Serial Error","serial port is closed!")
 
-'''
-reference:
-https://stackoverflow.com/questions/14487151/pyserial-full-duplex-communication
-https://robotics.stackexchange.com/questions/11897/how-to-read-and-write-data-with-pyserial-at-same-time
-'''
-def open_serial_click():
-    ser.port = serial_port.get()
-    ser.baudrate = int(baud_rate.get(), 10)
-    ser.timeout = 0
-    if ser.isOpen() :
-        ser.close()
-    try:
-        ser.open()
-    except SerialException:
-        messagebox.showerror("Serial Error", "could not open port {}".format(ser.port))
-        return
-    Rx = threading.Thread(target=up_process, args=())
-    send_pid_btn.configure(state=ACTIVE)
-    close_serial_btn.configure(state=ACTIVE)
-    open_serial_btn.configure(state=DISABLED)
-    
-def close_serial_click():
-    ser.close()
-    send_pid_btn.configure(state=DISABLED)
-    close_serial_btn.configure(state=DISABLED)
-    open_serial_btn.configure(state=ACTIVE)
-    
 
 '''
  TODO 
  read data received from STM
  etc
 '''
+
 def up_process():
-    while True:
+    while is_serial_open == True:
         # read(17) for test
         recv = ser.read(17)
+        if len(recv) > 0:
+            print("data received: ", recv)
         recv_buf_str.set(recv.hex())
+        sleep(0.5)
+        print("not blocked")
 
+Rx = threading.Thread(target=up_process, args=())
+is_serial_open = False
+
+
+'''
+reference:
+https://stackoverflow.com/questions/14487151/pyserial-full-duplex-communication
+https://robotics.stackexchange.com/questions/11897/how-to-read-and-write-data-with-pyserial-at-same-time
+'''
+
+def open_serial_click():
+    ser.port = serial_port.get()
+    ser.baudrate = int(baud_rate.get(), 10)
+    ser.timeout = 0
+    if ser.isOpen():
+        ser.close()
+    try:
+        ser.open()
+    except SerialException:
+        messagebox.showerror("Serial Error", "could not open port {}".format(ser.port))
+        return
+    global is_serial_open
+    is_serial_open = True
+    Rx.start()
+    send_pid_btn.configure(state=ACTIVE)
+    close_serial_btn.configure(state=ACTIVE)
+    open_serial_btn.configure(state=DISABLED)
+    
+def close_serial_click():
+    ser.close()
+    global is_serial_open
+    is_serial_open = False
+    send_pid_btn.configure(state=DISABLED)
+    close_serial_btn.configure(state=DISABLED)
+    open_serial_btn.configure(state=ACTIVE)
+    
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # +     4    +     1     +    4    +    1   +  4 +  4 +  4 +    1    +
