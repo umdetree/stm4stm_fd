@@ -26,18 +26,22 @@ def send_pid_click():
  read data received from STM
  etc
 '''
+is_serial_open = False
+Rx: threading.Thread
 
 def up_process():
     while is_serial_open == True:
         # read(17) for test
-        recv = ser.read(17)
+        try:
+            recv = ser.read(1)
+        except SerialException:
+            print("Error: up_process thread failed to read from serial port")
+
         if len(recv) > 0:
-            print("data received: ", recv)
+            print("data received: ", recv.hex())
             recv_buf_str.set(recv.hex())
         sleep(0.5)
 
-Rx = threading.Thread(target=up_process, args=())
-is_serial_open = False
 
 
 '''
@@ -57,9 +61,13 @@ def open_serial_click():
     except SerialException:
         messagebox.showerror("Serial Error", "could not open port {}".format(ser.port))
         return
+    
     global is_serial_open
     is_serial_open = True
+    global Rx
+    Rx = threading.Thread(target=up_process, args={})
     Rx.start()
+
     send_pid_btn.configure(state=ACTIVE)
     close_serial_btn.configure(state=ACTIVE)
     open_serial_btn.configure(state=DISABLED)
@@ -67,7 +75,9 @@ def open_serial_click():
 def close_serial_click():
     global is_serial_open
     is_serial_open = False
-    sleep(0.1)
+    if Rx.is_alive() == True:
+        Rx.join()
+    
     ser.close()
     send_pid_btn.configure(state=DISABLED)
     close_serial_btn.configure(state=DISABLED)
@@ -146,5 +156,6 @@ close_serial_btn.grid(column=5, row=2)
 window.mainloop()
 
 is_serial_open = False
-sleep(0.1)
+if Rx.is_alive() == True:
+    Rx.join()
 ser.close()
