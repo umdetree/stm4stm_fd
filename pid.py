@@ -41,6 +41,7 @@ def up_process():
             print("data received: ", recv.hex())
             recv_buf_str.set(recv.hex())
         sleep(0.5)
+        print("up_process debug signal")
 
 
 
@@ -53,7 +54,8 @@ https://robotics.stackexchange.com/questions/11897/how-to-read-and-write-data-wi
 def open_serial_click():
     ser.port = serial_port.get()
     ser.baudrate = int(baud_rate.get(), 10)
-    ser.timeout = 0
+    ser.timeout = 1.0
+
     if ser.isOpen():
         ser.close()
     try:
@@ -75,10 +77,12 @@ def open_serial_click():
 def close_serial_click():
     global is_serial_open
     is_serial_open = False
+
     if Rx.is_alive() == True:
         Rx.join()
     
     ser.close()
+
     send_pid_btn.configure(state=DISABLED)
     close_serial_btn.configure(state=DISABLED)
     open_serial_btn.configure(state=ACTIVE)
@@ -102,10 +106,9 @@ def make_pid_frame():
 def checksum(frame):
     cs = 0
     for b in frame:
-        print("b is {:x}".format(b))
         cs += b
     cs = cs & 0xff
-    print("checksum of {} is {:x}".format(frame, cs))
+    print("checksum of {} is {:x}".format(frame.hex(), cs))
     return cs
 
 
