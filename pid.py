@@ -9,8 +9,16 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from serial.serialutil import SerialException
 from time import sleep
 
+import utils
+
+BUFFER_SIZE = 1024
+
 ser = serial.Serial()
 
+'''
+Closed by default.
+Open after calling open_serial_click()
+'''
 def send_pid_click():
     print("send_pid_click")
     pid_frame = make_pid_frame()
@@ -21,36 +29,13 @@ def send_pid_click():
         messagebox.showerror("Serial Error","serial port is closed!")
 
 
-'''
- TODO 
- read data received from STM
- etc
-'''
 is_serial_open = False
 Rx: threading.Thread
-
-def up_process():
-    while is_serial_open == True:
-        # read(17) for test
-        try:
-            recv = ser.read(1)
-        except SerialException:
-            print("Error: up_process thread failed to read from serial port")
-
-        if len(recv) > 0:
-            print("data received: ", recv.hex())
-            recv_buf_str.set(recv.hex())
-        sleep(0.5)
-        print("up_process debug signal")
-
-
-
 '''
 reference:
 https://stackoverflow.com/questions/14487151/pyserial-full-duplex-communication
 https://robotics.stackexchange.com/questions/11897/how-to-read-and-write-data-with-pyserial-at-same-time
 '''
-
 def open_serial_click():
     ser.port = serial_port.get()
     ser.baudrate = int(baud_rate.get(), 10)
@@ -63,17 +48,63 @@ def open_serial_click():
     except SerialException:
         messagebox.showerror("Serial Error", "could not open port {}".format(ser.port))
         return
-    
+
+    ser.setDTR(False)
+    ser.setRTS(False) 
     global is_serial_open
     is_serial_open = True
     global Rx
-    Rx = threading.Thread(target=up_process, args={})
+    Rx = threading.Thread(target=up_process_tr1, args={})
     Rx.start()
 
     send_pid_btn.configure(state=ACTIVE)
     close_serial_btn.configure(state=ACTIVE)
     open_serial_btn.configure(state=DISABLED)
     
+
+'''
+ TODO 
+ read and process data received from STM
+'''
+def up_process():
+    while is_serial_open == True:
+        # read(17) for test
+        recv = str()
+        try:
+            recv_head = ser.read(4)[::-1].hex()
+            if recv_head.lower() == "59485a53":
+                recv += recv_head
+
+                # read channel addr
+                recv += ser.read(1)[::-1].hex()
+
+                recv_len = ser.read(4)[::-1].hex()
+                recv += recv_len
+                print("recv_len is ", recv_len)
+                left_len = int(recv_len, base=16) - 9
+                recv += utils.parse_data_after_len(ser.read(left_len))
+        except SerialException:
+            print("Error: up_process thread failed to read from serial port")
+
+        if len(recv) > 0:
+            print("data received: ", recv)
+            recv_buf_str.set(recv)
+        
+        ser.flushInput()
+        sleep(0.5)
+        # print("up_process debug signal")
+
+def up_process_tr1():
+    ser.timeout = 0.5
+    while is_serial_open == True:
+        try:
+            recv_b = ser.read(BUFFER_SIZE)
+        except SerialException:
+            print("Error: up_process thread failed to read from serial port")
+        # ser.flushInput()
+        utils.parse_read_buf(recv_b)
+
+
 def close_serial_click():
     global is_serial_open
     is_serial_open = False
@@ -94,11 +125,11 @@ def close_serial_click():
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 def make_pid_frame():
-    ret_s = "59485A53" + "01" + "00000017" + "03"
+    ret_s = "535a4859" + "01" + "17000000" + "03"
     ret = bytearray.fromhex(ret_s)
-    ret += int(p_spin.get(), 10).to_bytes(4, 'big')
-    ret += int(i_spin.get(), 10).to_bytes(4, 'big')
-    ret += int(d_spin.get(), 10).to_bytes(4, 'big')
+    ret += int(p_spin.get(), 10).to_bytes(4, 'little')
+    ret += int(i_spin.get(), 10).to_bytes(4, 'little')
+    ret += int(d_spin.get(), 10).to_bytes(4, 'little')
     ret.append(checksum(ret))
     print("the pid_frame is {}".format(ret.hex()))
     return ret
