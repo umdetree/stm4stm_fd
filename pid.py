@@ -19,11 +19,11 @@ PERIOD_CMD = "06"
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # +     4    +     1     +    4    +    1   +  4 +  4 +  4 +    1    +
-# +包头4bytes 通道地址1byte 包长度0x17 指令0x03 P(4) I(4) D(4) 校验和1byte
+# +包头4bytes 通道地址1byte 包长度0x17 指令0x10 P(4) I(4) D(4) 校验和1byte
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 def make_pid_packet():
-    ret_s = "535a4859" + "01" + "17000000" + "03"
+    ret_s = "535a4859" + "01" + "17000000" + "10"
     ret = bytearray.fromhex(ret_s)
 
     ret += int(p_spin.get(), 10).to_bytes(4, 'little')
@@ -35,7 +35,17 @@ def make_pid_packet():
     print("the pid_packet is {}".format(ret.hex()))
     return ret
 
-def checksum(packet):
+def make_target_packet():
+    ret_s = "535a4859" + "01" + "0f000000" + "11"
+    ret = bytearray.fromhex(ret_s)
+
+    ret += int(target_spin.get(), 10).to_bytes(4, 'little')
+    ret.append(checksum(ret))
+
+    print("the target_packet is ", ret.hex())
+    return ret
+
+def checksum(packet: bytearray):
     cs = 0
     for b in packet:
         cs += b
@@ -57,6 +67,14 @@ def send_pid_click():
     send_buf_str.set(pid_packet.hex())
     try:
         ser.write(pid_packet)
+    except SerialException:
+        messagebox.showerror("Serial Error","serial port may be closed!")
+
+def send_target_click():
+    print("send_target_click")
+    target_packet = make_target_packet()
+    try:
+        ser.write(target_packet)
     except SerialException:
         messagebox.showerror("Serial Error","serial port may be closed!")
 
@@ -87,6 +105,7 @@ def open_serial_click():
     Rx.start()
 
     send_pid_btn.configure(state=ACTIVE)
+    send_target_btn.configure(state=ACTIVE)
     close_serial_btn.configure(state=ACTIVE)
     open_serial_btn.configure(state=DISABLED)
     
@@ -180,6 +199,7 @@ def process_packet(packet: str):
         if stm_target.get() != target:
             stm_target.set(target)
             print("target updated: target=", target)
+            print("target_packet: ", packet)
 
     if cmd == FACT_CMD:
         fact = int(packet[20:28], base=16)
@@ -203,6 +223,7 @@ def close_serial_click():
     ser_lock.release()
 
     send_pid_btn.configure(state=DISABLED)
+    send_target_btn.configure(state=DISABLED)
     close_serial_btn.configure(state=DISABLED)
     open_serial_btn.configure(state=ACTIVE)
     
@@ -225,6 +246,13 @@ d_spin.grid(column=1, row=2)
 
 send_pid_btn = Button(window, text="发送pid", command=send_pid_click, state=DISABLED)
 send_pid_btn.grid(column=1, row=3)
+
+Label(window, text="target").grid(column=0, row=4)
+target_spin = Spinbox(window, from_=25, to=120, width=3)
+target_spin.grid(column=1, row=4)
+
+send_target_btn = Button(window, text="发送target", command=send_target_click, state=DISABLED)
+send_target_btn.grid(column=1, row=5)
 
 # GUI part 2: buffer view 
 Label(window, text="发送的数据包:").grid(column=2, row=0)
