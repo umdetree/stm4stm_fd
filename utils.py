@@ -12,7 +12,6 @@ def parse_read_buf(data: bytearray):
     
     pos = 0
     seg_head = bytearray.fromhex("535a4859")
-    total = 0
 
     while pos < length:
         packet = str()
@@ -38,7 +37,6 @@ def parse_read_buf(data: bytearray):
         pos += (packet_len - 9)
 
         process_packet(packet)
-        total += 1
 
 
 '''

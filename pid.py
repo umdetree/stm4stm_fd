@@ -9,9 +9,40 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from serial.serialutil import SerialException
 from time import sleep
 
-import utils
 
 BUFFER_SIZE = 1024
+TARGET_CMD = "01"
+FACT_CMD = "02"
+PID_CMD = "03"
+PERIOD_CMD = "06"
+
+stm_target = 0
+stm_fact = 0
+stm_period = 0
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# +     4    +     1     +    4    +    1   +  4 +  4 +  4 +    1    +
+# +包头4bytes 通道地址1byte 包长度0x17 指令0x03 P(4) I(4) D(4) 校验和1byte
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+def make_pid_packet():
+    ret_s = "535a4859" + "01" + "17000000" + "03"
+    ret = bytearray.fromhex(ret_s)
+    ret += int(p_spin.get(), 10).to_bytes(4, 'little')
+    ret += int(i_spin.get(), 10).to_bytes(4, 'little')
+    ret += int(d_spin.get(), 10).to_bytes(4, 'little')
+    ret.append(checksum(ret))
+    print("the pid_packet is {}".format(ret.hex()))
+    return ret
+
+def checksum(packet):
+    cs = 0
+    for b in packet:
+        cs += b
+    cs = cs & 0xff
+    print("checksum of {} is {:x}".format(packet.hex(), cs))
+    return cs
+
 
 ser = serial.Serial()
 
@@ -21,12 +52,12 @@ Open after calling open_serial_click()
 '''
 def send_pid_click():
     print("send_pid_click")
-    pid_frame = make_pid_frame()
-    send_buf_str.set(pid_frame.hex())
+    pid_packet = make_pid_packet()
+    send_buf_str.set(pid_packet.hex())
     try:
-        ser.write(pid_frame)
+        ser.write(pid_packet)
     except SerialException:
-        messagebox.showerror("Serial Error","serial port is closed!")
+        messagebox.showerror("Serial Error","serial port may be closed!")
 
 
 is_serial_open = False
@@ -39,22 +70,21 @@ https://robotics.stackexchange.com/questions/11897/how-to-read-and-write-data-wi
 def open_serial_click():
     ser.port = serial_port.get()
     ser.baudrate = int(baud_rate.get(), 10)
-    ser.timeout = 1.0
 
     if ser.isOpen():
         ser.close()
     try:
         ser.open()
+        ser.setDTR(False)
+        ser.setRTS(False) 
     except SerialException:
         messagebox.showerror("Serial Error", "could not open port {}".format(ser.port))
         return
 
-    ser.setDTR(False)
-    ser.setRTS(False) 
     global is_serial_open
     is_serial_open = True
     global Rx
-    Rx = threading.Thread(target=up_process_tr1, args={})
+    Rx = threading.Thread(target=up_process, args={})
     Rx.start()
 
     send_pid_btn.configure(state=ACTIVE)
@@ -62,39 +92,7 @@ def open_serial_click():
     open_serial_btn.configure(state=DISABLED)
     
 
-'''
- TODO 
- read and process data received from STM
-'''
 def up_process():
-    while is_serial_open == True:
-        # read(17) for test
-        recv = str()
-        try:
-            recv_head = ser.read(4)[::-1].hex()
-            if recv_head.lower() == "59485a53":
-                recv += recv_head
-
-                # read channel addr
-                recv += ser.read(1)[::-1].hex()
-
-                recv_len = ser.read(4)[::-1].hex()
-                recv += recv_len
-                print("recv_len is ", recv_len)
-                left_len = int(recv_len, base=16) - 9
-                recv += utils.parse_data_after_len(ser.read(left_len))
-        except SerialException:
-            print("Error: up_process thread failed to read from serial port")
-
-        if len(recv) > 0:
-            print("data received: ", recv)
-            recv_buf_str.set(recv)
-        
-        ser.flushInput()
-        sleep(0.5)
-        # print("up_process debug signal")
-
-def up_process_tr1():
     ser.timeout = 0.5
     while is_serial_open == True:
         try:
@@ -102,7 +100,87 @@ def up_process_tr1():
         except SerialException:
             print("Error: up_process thread failed to read from serial port")
         # ser.flushInput()
-        utils.parse_read_buf(recv_b)
+        parse_read_buf(recv_b)
+
+def parse_read_buf(data: bytearray):
+    length = len(data)
+    if length >= BUFFER_SIZE:
+        print("Warning: read buffer overflow!")
+    
+    pos = 0
+    seg_head = bytearray.fromhex("535a4859")
+
+    while pos < length:
+        packet = str()
+
+        # head segment
+        pos += data[pos:].find(seg_head)
+        if pos < 0:
+            return
+        packet += data[pos:(pos + 4)][::-1].hex()
+        pos += 4
+
+        # channel and length segments
+        packet += data[pos:(pos + 1)][::-1].hex()
+        pos += 1
+        seg_len = data[pos:(pos + 4)][::-1].hex()
+        packet += seg_len
+        packet_len = int(seg_len, base=16)
+        pos += 4
+
+        # cmd, parameters and checksum segments
+        seg_etc = parse_data_after_len(data[pos:(pos - 9 + packet_len)])
+        packet += seg_etc
+        pos += (packet_len - 9)
+
+        process_packet(packet)
+
+'''
+Parse a packet received from stm32
+after having received the length 
+segments. Return remaining segments
+'''
+def parse_data_after_len(bytes_left: bytearray) -> str:
+    ret = str()
+    pos = 0
+    length = len(bytes_left)
+    # cmd segment: 1 byte
+    ret += bytes_left[pos:(pos + 1)].hex()
+    pos += 1
+    # parameter segments: (length - 2) bytes
+    if (length - pos - 1) % 4 != 0:
+        print("Warning: could not parse parameter segments")
+        return str()
+    while pos < length - 1:
+        ret += bytes_left[pos:(pos + 4)][::-1].hex()
+        pos += 4
+    # checksum secgment: 1 byte
+    ret += bytes_left[pos:(pos + 1)].hex()
+
+    return ret
+
+def process_packet(packet: str):
+    cmd = packet[18:20]
+    if cmd == TARGET_CMD:
+        target = int(packet[20:28], base=16)
+        global stm_target
+        if stm_target != target:
+            stm_target = target
+            print("target updated: target=", target)
+
+    if cmd == FACT_CMD:
+        fact = int(packet[20:28], base=16)
+        global stm_fact
+        if stm_fact != fact:
+            stm_fact = fact
+            print("fact updated: fact=", fact)
+        
+    if cmd == PERIOD_CMD:
+        period = int(packet[20:28], base=16)
+        global stm_period
+        if stm_period != period:
+            stm_period = period
+            print("period updated: period=", period)
 
 
 def close_serial_click():
@@ -118,29 +196,6 @@ def close_serial_click():
     close_serial_btn.configure(state=DISABLED)
     open_serial_btn.configure(state=ACTIVE)
     
-
-# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# +     4    +     1     +    4    +    1   +  4 +  4 +  4 +    1    +
-# +包头4bytes 通道地址1byte 包长度0x17 指令0x03 P(4) I(4) D(4) 校验和1byte
-# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-def make_pid_frame():
-    ret_s = "535a4859" + "01" + "17000000" + "03"
-    ret = bytearray.fromhex(ret_s)
-    ret += int(p_spin.get(), 10).to_bytes(4, 'little')
-    ret += int(i_spin.get(), 10).to_bytes(4, 'little')
-    ret += int(d_spin.get(), 10).to_bytes(4, 'little')
-    ret.append(checksum(ret))
-    print("the pid_frame is {}".format(ret.hex()))
-    return ret
-
-def checksum(frame):
-    cs = 0
-    for b in frame:
-        cs += b
-    cs = cs & 0xff
-    print("checksum of {} is {:x}".format(frame.hex(), cs))
-    return cs
 
 
 window = Tk()
