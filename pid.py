@@ -16,9 +16,6 @@ FACT_CMD = "02"
 PID_CMD = "03"
 PERIOD_CMD = "06"
 
-stm_target = 0
-stm_fact = 0
-stm_period = 0
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # +     4    +     1     +    4    +    1   +  4 +  4 +  4 +    1    +
@@ -28,10 +25,13 @@ stm_period = 0
 def make_pid_packet():
     ret_s = "535a4859" + "01" + "17000000" + "03"
     ret = bytearray.fromhex(ret_s)
+
     ret += int(p_spin.get(), 10).to_bytes(4, 'little')
     ret += int(i_spin.get(), 10).to_bytes(4, 'little')
     ret += int(d_spin.get(), 10).to_bytes(4, 'little')
+
     ret.append(checksum(ret))
+
     print("the pid_packet is {}".format(ret.hex()))
     return ret
 
@@ -39,6 +39,7 @@ def checksum(packet):
     cs = 0
     for b in packet:
         cs += b
+
     cs = cs & 0xff
     print("checksum of {} is {:x}".format(packet.hex(), cs))
     return cs
@@ -60,7 +61,6 @@ def send_pid_click():
         messagebox.showerror("Serial Error","serial port may be closed!")
 
 
-is_serial_open = False
 Rx: threading.Thread
 '''
 reference:
@@ -73,16 +73,15 @@ def open_serial_click():
 
     if ser.isOpen():
         ser.close()
+
     try:
         ser.open()
         ser.setDTR(False)
         ser.setRTS(False) 
     except SerialException:
-        messagebox.showerror("Serial Error", "could not open port {}".format(ser.port))
+        messagebox.showerror("Serial Error", "Could not open port {}".format(ser.port))
         return
 
-    global is_serial_open
-    is_serial_open = True
     global Rx
     Rx = threading.Thread(target=up_process, args={})
     Rx.start()
@@ -91,12 +90,21 @@ def open_serial_click():
     close_serial_btn.configure(state=ACTIVE)
     open_serial_btn.configure(state=DISABLED)
     
+ser_lock = threading.Lock()
 
 def up_process():
     ser.timeout = 0.5
-    while is_serial_open == True:
+    while True:
         try:
+            ser_lock.acquire()
+
+            if ser.is_open == False:
+                ser_lock.release()
+                break
             recv_b = ser.read(BUFFER_SIZE)
+
+            ser_lock.release()
+
         except SerialException:
             print("Error: up_process thread failed to read from serial port")
         # ser.flushInput()
@@ -144,16 +152,20 @@ def parse_data_after_len(bytes_left: bytearray) -> str:
     ret = str()
     pos = 0
     length = len(bytes_left)
+
     # cmd segment: 1 byte
     ret += bytes_left[pos:(pos + 1)].hex()
     pos += 1
+
     # parameter segments: (length - 2) bytes
     if (length - pos - 1) % 4 != 0:
         print("Warning: could not parse parameter segments")
         return str()
+
     while pos < length - 1:
         ret += bytes_left[pos:(pos + 4)][::-1].hex()
         pos += 4
+    
     # checksum secgment: 1 byte
     ret += bytes_left[pos:(pos + 1)].hex()
 
@@ -161,36 +173,34 @@ def parse_data_after_len(bytes_left: bytearray) -> str:
 
 def process_packet(packet: str):
     cmd = packet[18:20]
+
     if cmd == TARGET_CMD:
         target = int(packet[20:28], base=16)
         global stm_target
-        if stm_target != target:
-            stm_target = target
+        if stm_target.get() != target:
+            stm_target.set(target)
             print("target updated: target=", target)
 
     if cmd == FACT_CMD:
         fact = int(packet[20:28], base=16)
         global stm_fact
-        if stm_fact != fact:
-            stm_fact = fact
+        if stm_fact.get() != fact:
+            stm_fact.set(fact)
             print("fact updated: fact=", fact)
         
     if cmd == PERIOD_CMD:
         period = int(packet[20:28], base=16)
         global stm_period
-        if stm_period != period:
-            stm_period = period
+        if stm_period.get() != period:
+            stm_period.set(period)
             print("period updated: period=", period)
 
 
 def close_serial_click():
-    global is_serial_open
-    is_serial_open = False
-
-    if Rx.is_alive() == True:
-        Rx.join()
-    
+    ser_lock.acquire()
+    print("Debug: ser.close()")
     ser.close()
+    ser_lock.release()
 
     send_pid_btn.configure(state=DISABLED)
     close_serial_btn.configure(state=DISABLED)
@@ -225,6 +235,21 @@ Label(window, text="接收的数据包:").grid(column=2, row=1)
 recv_buf_str = StringVar()
 Entry(window, textvariable=recv_buf_str, width=50, background="white", state='readonly').grid(column=3, row=1)
 
+Label(window, text="target:").grid(column=2, row=2)
+stm_target = IntVar()
+stm_target.set(0)
+Entry(window, textvariable=stm_target, width=10, background='white', state='readonly').grid(column=3, row=2, sticky='w')
+
+Label(window, text="fact:").grid(column=2, row=3)
+stm_fact = IntVar()
+stm_fact.set(0)
+Entry(window, textvariable=stm_fact, width=10, background='white', state='readonly').grid(column=3, row=3, sticky='w')
+
+Label(window, text="period:").grid(column=2, row=4)
+stm_period = IntVar()
+stm_period.set(0)
+Entry(window, textvariable=stm_period, width=10, background='white', state='readonly').grid(column=3, row=4, sticky='w')
+
 # GUI part 3: serial port 
 Label(window, text="选择串口:").grid(column=4, row=0)
 serial_port = Combobox(window)
@@ -244,7 +269,7 @@ close_serial_btn.grid(column=5, row=2)
 
 window.mainloop()
 
-is_serial_open = False
-if Rx.is_alive() == True:
-    Rx.join()
+
+ser_lock.acquire()
 ser.close()
+ser_lock.release()
